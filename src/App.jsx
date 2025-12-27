@@ -26,7 +26,7 @@ import {
   Check
 } from 'lucide-react';
 
-// --- 1. นำค่า Config จาก Firebase มาใส่ตรงนี้ ---
+// --- 1. การตั้งค่า Firebase (Config ของคุณ) ---
 const firebaseConfig = {
   apiKey: "AIzaSyCAZtfBjDPE6Af5uyUqrlibN4XpPelpobA",
   authDomain: "my-duty-roster-b1ae5.firebaseapp.com",
@@ -37,12 +37,12 @@ const firebaseConfig = {
   measurementId: "G-K0SVEWG6GJ"
 };
 
-// Initialize Firebase
+// --- 2. เริ่มต้นระบบ Firebase ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ใช้ Collection ชื่อคงที่สำหรับแอปนี้
+// ใช้ Collection ชื่อนี้เสมอ
 const COLLECTION_NAME = 'duty_roster_group_1';
 
 export default function DutyRosterApp() {
@@ -55,14 +55,18 @@ export default function DutyRosterApp() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Initialize Auth
+  // 3. ระบบล็อกอิน (Anonymous)
   useEffect(() => {
     const initAuth = async () => {
       try {
         await signInAnonymously(auth);
       } catch (err) {
         console.error("Auth error:", err);
-        setError("ไม่สามารถเชื่อมต่อระบบได้ กรุณารีเฟรชหน้าจอ");
+        if (err.code === 'auth/configuration-not-found') {
+          setError("ต้องเปิดใช้งาน Anonymous Auth ใน Firebase Console ก่อนครับ");
+        } else {
+          setError("ไม่สามารถเชื่อมต่อระบบได้ กรุณารีเฟรชหน้าจอ");
+        }
       }
     };
     initAuth();
@@ -73,42 +77,49 @@ export default function DutyRosterApp() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Data Sync
+  // 4. ระบบดึงข้อมูล Real-time
   useEffect(() => {
     if (!user) return;
 
-    const rosterRef = collection(db, COLLECTION_NAME);
+    try {
+      const rosterRef = collection(db, COLLECTION_NAME);
 
-    const unsubscribe = onSnapshot(rosterRef, (snapshot) => {
-      const usersData = [];
-      let currentUserJoined = false;
+      const unsubscribe = onSnapshot(rosterRef, (snapshot) => {
+        const usersData = [];
+        let currentUserJoined = false;
 
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        usersData.push(data);
-        if (data.uid === user.uid) {
-          currentUserJoined = true;
-        }
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          usersData.push(data);
+          if (data.uid === user.uid) {
+            currentUserJoined = true;
+          }
+        });
+
+        // เรียงลำดับ
+        usersData.sort((a, b) => {
+          if (a.number !== null && b.number !== null) return a.number - b.number;
+          if (a.number !== null) return -1;
+          if (b.number !== null) return 1;
+          return a.joinedAt - b.joinedAt;
+        });
+
+        setParticipants(usersData);
+        setIsJoined(currentUserJoined);
+        setLoading(false);
+      }, (err) => {
+        console.error("Snapshot error:", err);
+        setError("เกิดข้อผิดพลาดในการโหลดข้อมูล (Permission หรือ Config)");
       });
 
-      usersData.sort((a, b) => {
-        if (a.number !== null && b.number !== null) return a.number - b.number;
-        if (a.number !== null) return -1;
-        if (b.number !== null) return 1;
-        return a.joinedAt - b.joinedAt;
-      });
-
-      setParticipants(usersData);
-      setIsJoined(currentUserJoined);
-      setLoading(false);
-    }, (err) => {
-      console.error("Snapshot error:", err);
-      setError("เกิดข้อผิดพลาดในการโหลดข้อมูล (ตรวจสอบ Firebase Config)");
-    });
-
-    return () => unsubscribe();
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Collection error:", err);
+      setError("ไม่สามารถเชื่อมต่อฐานข้อมูลได้");
+    }
   }, [user]);
 
+  // ฟังก์ชันเข้าร่วม
   const handleJoin = async (e) => {
     e.preventDefault();
     if (!nameInput.trim() || !user) return;
@@ -128,12 +139,13 @@ export default function DutyRosterApp() {
       setNameInput('');
     } catch (err) {
       console.error("Join error:", err);
-      setError("ไม่สามารถเข้าร่วมได้ (ตรวจสอบ Permission Firestore)");
+      setError("ไม่สามารถเข้าร่วมได้ (ตรวจสอบ Firestore Rules)");
     } finally {
       setLoading(false);
     }
   };
 
+  // ฟังก์ชันจับฉลาก
   const handleDraw = async () => {
     if (!user || drawing) return;
     setDrawing(true);
@@ -197,7 +209,7 @@ export default function DutyRosterApp() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }).catch(() => {
-       // Fallback logic handled in UI mostly, but modern browsers support clipboard API
+       // Fallback logic
     });
   };
 
@@ -212,8 +224,11 @@ export default function DutyRosterApp() {
   if (loading && participants.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin text-blue-600">
-          <RotateCcw size={32} />
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin text-blue-600">
+            <RotateCcw size={32} />
+          </div>
+          {error && <p className="text-red-500 text-sm">{error}</p>}
         </div>
       </div>
     );
@@ -285,7 +300,7 @@ export default function DutyRosterApp() {
                             }
                           `}
                         >
-                          {drawing ? 'กำลังสุ่ม...' : '?? กดจับฉลาก'}
+                          {drawing ? 'กำลังสุ่ม...' : '🎲 กดจับฉลาก'}
                         </button>
                       </div>
                     ) : (
